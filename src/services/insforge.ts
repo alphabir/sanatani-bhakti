@@ -492,30 +492,53 @@ export const InsForgeService = {
    * Generate authentic Vedic recitation audio via the secure ElevenLabs InsForge Edge Function.
    */
   async generateTtsAudio(params: {
-    text: string;
-    voiceId?: string;
-  }): Promise<{ audioBase64: string | null; error: string | null }> {
+    /**
+     * The mantra's id. NOT its text: the edge function resolves the text from a
+     * server-side whitelist and pins the voice and model itself, so a caller
+     * cannot synthesize arbitrary text or pick the most expensive model.
+     */
+    mantraId: string;
+  }): Promise<{
+    audioBase64: string | null;
+    error: string | null;
+    /** Set when the server refused on quota, so the UI can nudge rather than just fail. */
+    quotaExhausted?: boolean;
+    isGuest?: boolean;
+    remaining?: number;
+  }> {
     try {
       const { data, error } = await insforge.functions.invoke('elevenlabs-tts', {
-        body: {
-          text: params.text,
-          voice_id: params.voiceId || 'pNInz6obpgDQGcFmaJgB', // Adam / Vedic tone
-        },
+        body: { mantra_id: params.mantraId },
       });
 
-      if (error || !data) {
+      // A quota refusal arrives as an error status, so read the body either way:
+      // the difference between "out of free recitations" and "something broke"
+      // is the difference between a useful nudge and a dead end.
+      const res = (data ?? {}) as {
+        audioBase64?: string;
+        error?: string;
+        is_guest?: boolean;
+        remaining?: number;
+      };
+
+      if (res.error || error) {
+        const message = res.error || error?.message || 'Failed to synthesize audio';
+        const quotaExhausted = /limit reached|used|sign in for more/i.test(message);
         return {
           audioBase64: null,
-          error: error?.message || 'Failed to synthesize audio from InsForge',
+          error: message,
+          quotaExhausted,
+          isGuest: res.is_guest,
+          remaining: res.remaining ?? 0,
         };
       }
 
-      const res = data as { audioBase64?: string; error?: string; format?: string };
-      if (res.error) {
-        return { audioBase64: null, error: res.error };
-      }
-
-      return { audioBase64: res.audioBase64 || null, error: null };
+      return {
+        audioBase64: res.audioBase64 || null,
+        error: null,
+        isGuest: res.is_guest,
+        remaining: res.remaining,
+      };
     } catch (err: any) {
       return {
         audioBase64: null,

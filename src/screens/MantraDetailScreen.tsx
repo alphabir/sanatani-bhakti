@@ -86,13 +86,27 @@ export function MantraDetailScreen() {
     // Otherwise, generate/fetch via InsForge Edge Function (ElevenLabs)
     setLoadingAudio(true);
     try {
-      // Text priority: Sanskrit mantra > transliteration
-      const textToSpeak = mantra.sanskrit || mantra.transliteration || mantra.titleHindi;
-      const res = await getOrGenerateMantraAudio(mantra.id, textToSpeak);
+      // Only the id travels: the server holds the mantra text and picks the
+      // voice, so the client cannot request arbitrary (billable) synthesis.
+      const res = await getOrGenerateMantraAudio(mantra.id);
 
       if (res.error || !res.uri) {
         setErrorMessage(res.error || 'Failed to synthesize audio');
-        Alert.alert('Chant Generation Notice', res.error || 'Unable to generate audio recitation. Please check your internet connection.');
+        if (res.quotaExhausted) {
+          // Out of free recitations is not a failure — it is the moment to
+          // offer the way forward, which differs for a guest and a member.
+          Alert.alert(
+            'Free recitations used',
+            res.isGuest
+              ? 'Sign in to receive more HD recitations. Mantras you have already downloaded stay free to replay.'
+              : 'You have reached today\'s recitation limit. It resets tomorrow, and downloaded mantras stay free to replay.',
+            res.isGuest
+              ? [{ text: 'Not now', style: 'cancel' }, { text: 'Sign in', onPress: () => navigate('auth') }]
+              : [{ text: 'OK' }],
+          );
+        } else {
+          Alert.alert('Chant Generation Notice', res.error || 'Unable to generate audio recitation. Please check your internet connection.');
+        }
         return;
       }
 

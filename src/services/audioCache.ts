@@ -56,32 +56,48 @@ export async function saveAudioToDisk(mantraId: string, base64Data: string): Pro
  */
 export async function getOrGenerateMantraAudio(
   mantraId: string,
-  text: string,
-  voiceId?: string
-): Promise<{ uri: string | null; error: string | null }> {
-  // 1. Check local cache
+): Promise<{
+  uri: string | null;
+  error: string | null;
+  /**
+   * Whether this came off disk. The caller needs to know because a cache hit
+   * costs nothing and must never be gated, counted, or nudged about — replaying
+   * a mantra you already downloaded stays free forever.
+   */
+  fromCache: boolean;
+  quotaExhausted?: boolean;
+  isGuest?: boolean;
+  remaining?: number;
+}> {
+  // 1. Local cache first, always. Free and offline.
   const cachedUri = await getCachedMantraAudioUri(mantraId);
   if (cachedUri) {
-    return { uri: cachedUri, error: null };
+    return { uri: cachedUri, error: null, fromCache: true };
   }
 
-  // 2. Synthesize via secure InsForge Edge Function
-  const res = await InsForgeService.generateTtsAudio({ text, voiceId });
+  // 2. Otherwise synthesize. The server resolves the text from its own
+  //    whitelist by id, enforces the quota, and refunds it if ElevenLabs fails.
+  const res = await InsForgeService.generateTtsAudio({ mantraId });
   if (res.error || !res.audioBase64) {
     return {
       uri: null,
       error: res.error || 'Failed to generate sacred audio recitation',
+      fromCache: false,
+      quotaExhausted: res.quotaExhausted,
+      isGuest: res.isGuest,
+      remaining: res.remaining,
     };
   }
 
-  // 3. Save to disk for offline listening
+  // 3. Save to disk so it is never paid for twice.
   try {
     const uri = await saveAudioToDisk(mantraId, res.audioBase64);
-    return { uri, error: null };
+    return { uri, error: null, fromCache: false, remaining: res.remaining, isGuest: res.isGuest };
   } catch (err: any) {
     return {
       uri: null,
       error: err?.message || 'Failed to cache audio on device',
+      fromCache: false,
     };
   }
 }
