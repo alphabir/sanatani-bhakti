@@ -104,7 +104,9 @@ Severity: 🔴 security/money · 🟠 user-visible wrong · 🟡 quality/debt ·
 
 Each phase ships on its own. Approvals are called out; nothing outward-facing happens without one.
 
-### Phase 0 — Stop the bleeding · ½ day · **needs approval (live DB)**
+### Phase 0 — Stop the bleeding · ✅ **DONE** 2026-09-05 (`297da2f`, branch `phase-0/backend-lockdown`)
+
+Applied and verified live: both open policies dropped (`anon` now has zero privileges; `authenticated` has SELECT + column-level UPDATE on 7 fields, **no INSERT**); `user_id`/`is_guest`/`upgraded_at`/`last_daily_claim` + quota counters added; `ensure_my_stats_row`, `claim_daily_reward`, `consume_quota`, `release_quota` created (authenticated-only EXECUTE); `credit_purchased_tokens`/`spend_chat_token` revoked to `project_admin`; TTS + astrologer redeployed behind a real JWT with the anon key explicitly rejected; `gemini-palm`, `kundli-calculate` and `verify-payment` deleted from the server (sources kept in `functions/`); 8 junk rows deleted. Probes: no header → 401, anon key → 401, `GET ?text=` → 405, `verify-payment` → 404.
 
 | Step | Fixes | Approval |
 |---|---|---|
@@ -119,7 +121,7 @@ Each phase ships on its own. Approvals are called out; nothing outward-facing ha
 
 ### Phase 1 — Correctness + identity + Aaj ka Prasad · 5–6 days
 
-**1A · One login, not two (first — every native change rides this)**
+**1A · One login, not two — ✅ DONE** (branch `phase-1a/one-login`). `prebuild --clean` removed the entire Firebase gate: `AuthActivity.kt`, `AuthRepository.kt`, `LoginViewModel.kt`, `activity_auth.xml`, the `AuthTheme` style, both `google-services.json`, `firebase.json`, `.firebaserc`, and every Firebase/Credential-Manager dependency in both gradle files. **`MainActivity` is the launcher again.** `MainActivity.kt`/`MainApplication.kt` were byte-identical after regeneration, confirming nothing custom was lost. Release permissions dropped `RECORD_AUDIO`, `READ_MEDIA_VIDEO`, `READ_MEDIA_AUDIO`; `SYSTEM_ALERT_WINDOW` now carries `tools:node="remove"` (it is kept in the debug manifests, where RN's dev menu wants it). `allowBackup=false` and `scheme: sanatanibhakti` landed in the same prebuild so 1B needs no second one. Original steps:
 - Delete the Kotlin Firebase gate: `AuthActivity.kt`, `data/AuthRepository.kt`, `ui/LoginViewModel.kt`, `res/layout/activity_auth.xml`, the `AuthTheme` style; remove `firebase-bom` / `firebase-auth` / credentials deps and `apply plugin: com.google.gms.google-services` from `android/app/build.gradle`, the classpath from `android/build.gradle`; delete both `google-services.json`, `firebase.json`, `.firebaserc`.
 - In `app.json` **before** prebuild: `expo-media-library` → `granularPermissions: ['photo']`; `expo-audio` → `recordAudioAndroid: false`; `android.allowBackup: false` (Auto Backup restores AsyncStorage but not the keystore SecureStore encrypts with — a restored device would mint a new guest and orphan the row); block `SYSTEM_ALERT_WINDOW`. The manifest today declares `RECORD_AUDIO` and `READ_MEDIA_IMAGES/VIDEO/AUDIO` for an app that records nothing and saves one wallpaper — Play's Photos & Video policy questions exactly that.
 - `npx expo prebuild --clean`; confirm `MainActivity` is the launcher and no `firebase` string remains in either gradle file; commit the regenerated `android/`. Phase 4 then re-runs prebuild on this **same shell**, so production ships what was tested.

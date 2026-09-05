@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "sanatanibhakti",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.sanatanibhakti.app"
@@ -19,7 +20,11 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -35,15 +40,17 @@
       [
         "expo-audio",
         {
-          "enableBackgroundPlayback": false
+          "enableBackgroundPlayback": false,
+          "recordAudioAndroid": false
         }
       ],
       [
         "expo-media-library",
         {
-          "savePhotosPermission": "Allow Sanatani Bhakti to save deity wallpapers and ringtones to your device.",
+          "savePhotosPermission": "Allow Sanatani Bhakti to save deity wallpapers to your device.",
           "photosPermission": "Allow Sanatani Bhakti to access your gallery to save wallpapers.",
-          "isAccessMediaLocationEnabled": false
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo"]
         }
       ],
       [

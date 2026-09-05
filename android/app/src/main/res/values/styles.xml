@@ -11,11 +11,4 @@
     <item name="postSplashScreenTheme">@style/AppTheme</item>
     <item name="android:windowSplashScreenBehavior">icon_preferred</item>
   </style>
-  <style name="AuthTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-    <item name="colorPrimary">#FF9933</item>
-    <item name="colorPrimaryVariant">#E67300</item>
-    <item name="colorOnPrimary">#000000</item>
-    <item name="android:statusBarColor">#0F0C08</item>
-    <item name="android:navigationBarColor">#0F0C08</item>
-  </style>
 </resources>

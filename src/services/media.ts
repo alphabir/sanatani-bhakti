@@ -35,6 +35,13 @@ async function stageBundledAsset(moduleId: number, filename: string): Promise<st
  * system sound picker costs one extra tap and works on every device.
  */
 export async function saveRingtone(moduleId: number, filename: string): Promise<SaveResult> {
+  // NOTE: READ_MEDIA_AUDIO is no longer declared. app.json pins
+  // expo-media-library to `granularPermissions: ["photo"]`, because Play's
+  // Photo and Video Permissions policy rejects broad media access for an app
+  // that only saves files. This is unreachable today — the ringtone feature is
+  // hidden until `assets/audio/` is populated (see HAS_RINGTONES) — but when
+  // ringtones do ship, add "audio" back to granularPermissions and re-run
+  // `expo prebuild --clean`, or this request will always be denied.
   const permission = await requestPermissionsAsync(false, ['audio']);
   if (!permission.granted) return { ok: false, reason: 'permission' };
 

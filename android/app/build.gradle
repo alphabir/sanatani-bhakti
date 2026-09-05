@@ -82,16 +82,12 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
-    buildFeatures {
-        viewBinding true
-    }
     ndkVersion = rootProject.ext.ndkVersion
     buildToolsVersion = rootProject.ext.buildToolsVersion
     compileSdk = rootProject.ext.compileSdkVersion
     namespace 'com.sanatanibhakti.app'
     defaultConfig {
         missingDimensionStrategy "platform", "play"
-
         applicationId 'com.sanatanibhakti.app'
         minSdk = rootProject.ext.minSdkVersion
         targetSdk = rootProject.ext.targetSdkVersion
@@ -157,7 +153,6 @@ android {
 
 dependencies {
     implementation "io.github.hyochan.openiap:openiap-google:3.3.2"
-
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
@@ -184,19 +179,4 @@ dependencies {
     } else {
         implementation jscFlavor
     }
-
-    // Firebase Android BoM & Authentication
-    implementation platform('com.google.firebase:firebase-bom:33.10.0')
-    implementation 'com.google.firebase:firebase-auth'
-    implementation 'com.google.android.material:material:1.12.0'
-
-    // Google Credential Manager & Identity
-    implementation 'androidx.credentials:credentials:1.3.0'
-    implementation 'androidx.credentials:credentials-play-services-auth:1.3.0'
-    implementation 'com.google.android.libraries.identity.googleid:googleid:1.1.1'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7'
 }
-
-apply plugin: "com.google.gms.google-services"
-

@@ -9,7 +9,6 @@ buildscript {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
-    classpath('com.google.gms:google-services:4.4.2')
   }
 }
 
@@ -18,15 +17,6 @@ allprojects {
     google()
     mavenCentral()
     maven { url = uri('https://www.jitpack.io') }
-  }
-
-  tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
-    kotlinOptions {
-      freeCompilerArgs += [
-        "-Xskip-metadata-version-check",
-        "-Xskip-prerelease-check"
-      ]
-    }
   }
 }
 
