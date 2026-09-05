@@ -74,7 +74,8 @@
       ],
       "expo-iap",
       "expo-asset",
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/withKotlinMetadataCheckSkip"
     ],
     "extra": {
       "eas": {

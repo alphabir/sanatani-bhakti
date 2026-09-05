@@ -22,3 +22,12 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+// @generated sanatani: skip kotlin metadata version check
+allprojects {
+  tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions {
+      freeCompilerArgs.add("-Xskip-metadata-version-check")
+    }
+  }
+}
