@@ -75,6 +75,12 @@
       "expo-iap",
       "expo-asset",
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "687fbd5e-c40c-4b96-b177-d773b3d2fcc3"
+      }
+    },
+    "owner": "indrajit.tewari"
   }
 }
