@@ -53,7 +53,10 @@ export function SectionTitle({
 }
 
 export function PunyaBadge() {
-  const { punyaPoints, streak, isAuthenticated, navigate } = useApp();
+  // Keyed on isGuest, not isAuthenticated: every device has a silent guest
+  // account, so isAuthenticated is true for everyone and would hide this
+  // entry point — the only route to signing in — from the users who need it.
+  const { punyaPoints, streak, isGuest, navigate } = useApp();
   return (
     <View style={styles.punyaRow}>
       <Pressable style={styles.punyaChip} onPress={() => navigate('profile')}>
@@ -65,11 +68,11 @@ export function PunyaBadge() {
         <Text style={styles.punyaText}>{streak} Days</Text>
       </Pressable>
       <Pressable
-        style={[styles.punyaChip, isAuthenticated ? styles.authChipActive : styles.authChipGuest]}
-        onPress={() => navigate(isAuthenticated ? 'profile' : 'auth')}
+        style={[styles.punyaChip, isGuest ? styles.authChipGuest : styles.authChipActive]}
+        onPress={() => navigate(isGuest ? 'auth' : 'profile')}
       >
-        <Text style={styles.punyaEmoji}>{isAuthenticated ? '✓' : '👤'}</Text>
-        <Text style={styles.punyaText}>{isAuthenticated ? 'Synced' : 'Sign In'}</Text>
+        <Text style={styles.punyaEmoji}>{isGuest ? '👤' : '✓'}</Text>
+        <Text style={styles.punyaText}>{isGuest ? 'Guest' : 'Synced'}</Text>
       </Pressable>
     </View>
   );

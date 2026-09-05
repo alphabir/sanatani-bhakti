@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Card, SectionTitle } from '../components/Card';
 import { Colors, FontSize, Spacing } from '../constants/theme';
 import { useApp } from '../context/AppContext';
@@ -10,10 +10,35 @@ export function ProfileScreen() {
   const {
     userName, punyaPoints, streak, jaapTotal, adsRemoved,
     favorites, navigate, setAdsRemoved, language,
-    cloudSyncStatus, syncToCloud, user, isAuthenticated, logout,
+    cloudSyncStatus, syncToCloud, user, isGuest, logout, deleteAccount,
   } = useApp();
   const { t } = useTranslation();
   const langInfo = getLanguage(language);
+
+  const confirmDelete = () => {
+    Alert.alert(
+      'Delete account & data',
+      isGuest
+        ? 'This permanently deletes your Punya, japamala tally, streak and favourites. Because you are signed in as a guest, this cannot be undone or recovered.'
+        : 'This permanently deletes your account and all devotional progress across every device. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await deleteAccount();
+            Alert.alert(
+              res.ok ? 'Account deleted' : 'Could not delete',
+              res.ok
+                ? 'Your account and devotional data have been removed.'
+                : res.error || 'Please check your connection and try again.',
+            );
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -21,24 +46,25 @@ export function ProfileScreen() {
       <View style={styles.profileHeader}>
         <View style={styles.avatarRing}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{isAuthenticated ? '🪷' : '🕉️'}</Text>
+            <Text style={styles.avatarText}>{isGuest ? '🕉️' : '🪷'}</Text>
           </View>
         </View>
-        <Text style={styles.name}>{userName || (isAuthenticated ? 'Vedic Seeker' : 'Dharmik Seeker')}</Text>
+        <Text style={styles.name}>{userName || (isGuest ? 'Dharmik Seeker' : 'Vedic Seeker')}</Text>
         <Text style={styles.tagline}>
-          {isAuthenticated ? '✦ Authenticated Vedic Seeker ✦' : '✦ Guest Spiritual Seeker ✦'}
+          {isGuest ? '✦ Guest Spiritual Seeker ✦' : '✦ Authenticated Vedic Seeker ✦'}
         </Text>
         <View style={styles.badgeRow}>
           <Text style={styles.langBadge}>🌐 {langInfo.nativeName}</Text>
-          {isAuthenticated ? (
-            <Text style={styles.verifiedBadge}>✓ Verified InsForge User</Text>
-          ) : (
+          {isGuest ? (
             <Text style={styles.astroBadge}>✨ Guest Mode</Text>
+          ) : (
+            <Text style={styles.verifiedBadge}>✓ Verified Seeker</Text>
           )}
         </View>
 
-        {/* Unique User ID Display */}
-        {isAuthenticated && user && (
+        {/* Identity, shown only for a real account. A guest's address is
+            synthesized on-device and would be meaningless — and alarming — here. */}
+        {!isGuest && user && (
           <View style={styles.uidContainer}>
             <Text style={styles.uidLabel}>UNIQUE SEEKER ID:</Text>
             <Text style={styles.uidText} numberOfLines={1}>{user.id}</Text>
@@ -47,19 +73,21 @@ export function ProfileScreen() {
         )}
       </View>
 
-      {/* InsForge Login / Sign Up Callout (if not authenticated) */}
-      {!isAuthenticated && (
+      {/* The reason to sign in, stated honestly: a guest's progress lives only
+          on this phone. Shown to guests only. */}
+      {isGuest && (
         <Pressable style={styles.authBannerCard} onPress={() => navigate('auth')}>
           <View style={styles.authBannerTop}>
-            <Text style={styles.authBannerBadge}>INSFORGE CLOUD ACCOUNT</Text>
+            <Text style={styles.authBannerBadge}>BACK UP YOUR PUNYA</Text>
             <Text style={styles.authBannerStars}>✦ ✦ ✦</Text>
           </View>
-          <Text style={styles.authBannerTitle}>🔐 Sign In or Create Your Unique Seeker Account</Text>
+          <Text style={styles.authBannerTitle}>🔐 Sign in to keep your progress safe</Text>
           <Text style={styles.authBannerSub}>
-            Every seeker gets a unique UUID on Postgres `auth.users`. Safeguard your Punya karma, Japamala tally, and streak forever across devices.
+            Your Punya, japamala tally and streak are saved on this phone only. Sign in and they are
+            kept safely in the cloud — and follow you to a new device.
           </Text>
           <View style={styles.authBannerBtn}>
-            <Text style={styles.authBannerBtnText}>✨ Login / Sign Up with InsForge →</Text>
+            <Text style={styles.authBannerBtnText}>✨ Sign In / Create Account →</Text>
           </View>
         </Pressable>
       )}
@@ -124,15 +152,21 @@ export function ProfileScreen() {
         <Text style={styles.menuItem}>🪷 {t('removeAds')}</Text>
       </Card>
 
-      {!isAuthenticated ? (
+      {isGuest ? (
         <Card onPress={() => navigate('auth')}>
-          <Text style={styles.menuItem}>🔑 Seeker Login / Sign Up</Text>
+          <Text style={styles.menuItem}>🔑 Sign In / Create Account</Text>
         </Card>
       ) : (
         <Card onPress={() => void logout()}>
-          <Text style={[styles.menuItem, { color: '#EF4444' }]}>🚪 Sign Out of InsForge</Text>
+          <Text style={[styles.menuItem, { color: '#EF4444' }]}>🚪 Sign Out</Text>
         </Card>
       )}
+
+      {/* Google Play requires in-app account deletion for any app that creates
+          accounts — which now includes every install, via the guest account. */}
+      <Card onPress={confirmDelete}>
+        <Text style={[styles.menuItem, { color: '#EF4444' }]}>🗑️ Delete Account & Data</Text>
+      </Card>
 
       {!adsRemoved && (
         <Card onPress={() => void showPrivacyOptions()}>
@@ -149,9 +183,11 @@ export function ProfileScreen() {
           <View style={[styles.statusIndicator, { backgroundColor: cloudSyncStatus === 'synced' ? '#10B981' : cloudSyncStatus === 'syncing' ? '#F59E0B' : Colors.primary }]} />
         </View>
         <Text style={styles.cloudSub}>
-          {cloudSyncStatus === 'synced'
-            ? `✓ Punya points, jaap count & streak safely backed up on InsForge ${isAuthenticated && user ? `(UID: ${user.id.slice(0, 8)}...)` : ''}`
-            : 'Tap to backup your spiritual progress to InsForge'}
+          {cloudSyncStatus !== 'synced'
+            ? 'Tap to back up your spiritual progress'
+            : isGuest
+            ? '✓ Saved — but only to this phone. Sign in to keep it if you change device.'
+            : `✓ Punya, jaap count & favourites backed up${user ? ` (UID: ${user.id.slice(0, 8)}…)` : ''}`}
         </Text>
       </Card>
 

@@ -1,4 +1,5 @@
 import { createClient } from '@insforge/sdk';
+import { Session } from './session';
 
 /**
  * InsForge BaaS Client Configuration
@@ -14,9 +15,23 @@ const INSFORGE_ANON_KEY =
   process.env.EXPO_PUBLIC_INSFORGE_ANON_KEY ||
   'anon_61a8c114d82b73f0652bf1898202bcbddeb5c8c91587a5531ea93b5ec8e85d63';
 
+/**
+ * `isServerMode: true` is required on React Native and is not optional.
+ *
+ * In the SDK's default browser mode the refresh token is returned as an
+ * httpOnly cookie, which React Native never receives — so no session could
+ * survive an app restart, for any account type. Server mode switches auth to
+ * the mobile flow (`?client_type=mobile`), which returns `refreshToken` in the
+ * response body and lets `refreshSession({ refreshToken })` restore a session
+ * from storage.
+ *
+ * Note this is set here rather than by passing `accessToken` to createClient:
+ * that option disables automatic token refresh.
+ */
 export const insforge = createClient({
   baseUrl: INSFORGE_URL,
   anonKey: INSFORGE_ANON_KEY,
+  isServerMode: true,
 });
 
 export interface LivePanchangResponse {
@@ -63,6 +78,22 @@ export interface AuthUser {
   createdAt?: string;
 }
 
+/** What the server says the user owns. The client caches this; it never decides it. */
+export interface StatsRow {
+  isGuest: boolean;
+  streak: number;
+  punyaPoints: number;
+}
+
+/** Result of Aaj ka Prasad. Every string on the card comes from these fields. */
+export interface DailyRewardResult {
+  granted: number;
+  streak: number;
+  tier: 'guest' | 'member';
+  tomorrowWouldGet: number;
+  signedInWouldGet: number;
+}
+
 export interface UserSyncPayload {
   userName: string;
   punyaPoints: number;
@@ -100,6 +131,13 @@ export const InsForgeService = {
       if (res.data && res.data.user) {
         const u = res.data.user;
         const userName = u.profile?.name || (u.metadata?.name as string | undefined) || undefined;
+        // Persist both tokens so the session survives a restart. In server mode
+        // the refresh token comes back in the body; in browser mode it would be
+        // a cookie we never see.
+        await Session.saveTokens(
+          res.data.accessToken || null,
+          (res.data as any).refreshToken || null,
+        );
         return {
           user: {
             id: u.id,
@@ -139,6 +177,10 @@ export const InsForgeService = {
       if (res.data && res.data.user) {
         const u = res.data.user;
         const userName = u.profile?.name || (u.metadata?.name as string | undefined) || undefined;
+        await Session.saveTokens(
+          res.data.accessToken || null,
+          (res.data as any).refreshToken || null,
+        );
         return {
           user: {
             id: u.id,
@@ -164,8 +206,12 @@ export const InsForgeService = {
   async signOut(): Promise<{ error: string | null }> {
     try {
       const res = await insforge.auth.signOut();
+      await Session.clearAll();
       return { error: res.error ? res.error.message : null };
     } catch (err: any) {
+      // Even if the server call fails, drop the local session — otherwise the
+      // user stays signed in on a device they asked to sign out of.
+      await Session.clearAll();
       return { error: err?.message || 'Sign out error.' };
     }
   },
@@ -250,15 +296,159 @@ export const InsForgeService = {
   },
 
   /**
-   * Sync user devotion stats & favorites with the InsForge database.
-   * Attaches the unique user ID when authenticated.
+   * Restore a session from SecureStore. Called once on cold boot.
+   *
+   * Order matters: the refresh token is tried first because it is the only
+   * path that works for every account type. The stored guest password is a
+   * fallback for guests whose refresh token has expired — email and Google
+   * users have no stored password, which is exactly why refresh comes first.
+   *
+   * @returns the signed-in user, or null if this device has no usable session
+   */
+  async restoreSession(): Promise<AuthUser | null> {
+    const { refreshToken } = await Session.getTokens();
+
+    if (refreshToken) {
+      try {
+        const res = await insforge.auth.refreshSession({ refreshToken });
+        if (!res.error && res.data?.accessToken) {
+          await Session.saveTokens(
+            res.data.accessToken,
+            (res.data as any).refreshToken || refreshToken,
+          );
+          // refreshSession hands back a token but does not install it on the
+          // client, so every later call would still go out as the anon key and
+          // getCurrentUser() would report nobody. This is the line that makes a
+          // session actually survive a restart.
+          insforge.setAccessToken(res.data.accessToken);
+          const user = await this.getCurrentUser();
+          if (user) return user;
+        }
+      } catch {
+        // fall through to the guest credential
+      }
+    }
+
+    const cred = await Session.getGuestCredential();
+    if (cred) {
+      const res = await this.signIn({ email: cred.email, password: cred.password });
+      if (res.user) return res.user;
+    }
+
+    return null;
+  },
+
+  /**
+   * Creates this device's guest account, so the phone has a real server
+   * identity from first launch. That identity is what lets the paid edge
+   * functions require a JWT without locking anyone out, and what makes free
+   * credits survive a "clear app data".
+   *
+   * The credential is generated on-device and never shown to the user.
+   */
+  async createGuest(): Promise<AuthUser | null> {
+    const cred = await Session.mintGuestCredential();
+    const res = await this.signUp({ email: cred.email, password: cred.password, name: 'Bhakt' });
+    if (!res.user) return null;
+    await Session.saveGuestCredential(cred);
+    await this.ensureStatsRow();
+    return res.user;
+  },
+
+  /** Creates the caller's stats row if absent. Idempotent; server decides is_guest. */
+  async ensureStatsRow(): Promise<StatsRow | null> {
+    try {
+      const { data, error } = await insforge.database.rpc('ensure_my_stats_row');
+      if (error) return null;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) return null;
+      return {
+        isGuest: !!row.is_guest,
+        streak: row.streak ?? 0,
+        punyaPoints: row.punya_points ?? 0,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Aaj ka Prasad. The server owns the amount, the streak and the calendar day
+   * (India time) — the phone only renders what comes back. `granted: 0` means
+   * it was already claimed today.
+   */
+  async claimDailyReward(): Promise<DailyRewardResult | null> {
+    try {
+      const { data, error } = await insforge.database.rpc('claim_daily_reward');
+      if (error) return null;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) return null;
+      return {
+        granted: row.granted ?? 0,
+        streak: row.streak ?? 0,
+        tier: row.tier === 'member' ? 'member' : 'guest',
+        tomorrowWouldGet: row.tomorrow_would_get ?? 0,
+        signedInWouldGet: row.signed_in_would_get ?? 0,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Reads this user's row back from the server.
+   *
+   * Nothing in the app has ever done this — sync was push-only, which is why
+   * "safely backed up" was never true. Pull before the first push so a second
+   * device cannot overwrite punya earned on the first.
+   */
+  async pullUserData(): Promise<Partial<UserSyncPayload> & { isGuest?: boolean } | null> {
+    try {
+      const { data, error } = await insforge.database
+        .from('bhakti_user_stats')
+        .select('*')
+        .limit(1);
+      if (error) return null;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) return null;
+      return {
+        userName: row.user_name ?? undefined,
+        punyaPoints: row.punya_points ?? 0,
+        streak: row.streak ?? 0,
+        jaapTotal: row.jaap_total ?? 0,
+        favorites: Array.isArray(row.favorites) ? row.favorites : [],
+        language: row.language ?? undefined,
+        adsRemoved: !!row.ads_removed,
+        isGuest: !!row.is_guest,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Sync devotion stats to the cloud.
+   *
+   * Was `.insert()`, which appended a row on every launch and referenced a
+   * `user_id` column that did not exist — so it silently failed for exactly
+   * the signed-in users it was meant to serve.
+   *
+   * This is an UPDATE, not an upsert, and deliberately so: the client holds no
+   * INSERT privilege on this table, because a client that could insert could
+   * choose its own `is_guest` value and hand itself member-tier rewards and
+   * quota. The row is created server-side by `ensure_my_stats_row()`, which is
+   * called before every sync path.
+   *
+   * Only client-writable columns are sent. `is_guest`, the daily-claim
+   * bookkeeping and the quota counters are server-owned; the column grants
+   * would reject them anyway.
    */
   async syncUserData(payload: UserSyncPayload): Promise<{ ok: boolean }> {
+    if (!payload.userId) return { ok: false };
     try {
       const row: Record<string, any> = {
         user_name: payload.userName || 'Bhakt',
         punya_points: payload.punyaPoints,
-        streak: payload.streak,
         jaap_total: payload.jaapTotal,
         favorites: payload.favorites,
         language: payload.language,
@@ -266,13 +456,10 @@ export const InsForgeService = {
         updated_at: new Date().toISOString(),
       };
 
-      if (payload.userId) {
-        row.user_id = payload.userId;
-      }
-
       const { error } = await insforge.database
         .from('bhakti_user_stats')
-        .insert([row]);
+        .update(row)
+        .eq('user_id', payload.userId);
 
       if (error) {
         console.warn('[InsForge] Cloud sync notice:', error.message);
@@ -280,6 +467,24 @@ export const InsForgeService = {
       return { ok: !error };
     } catch {
       return { ok: false };
+    }
+  },
+
+  /**
+   * Permanently deletes the account and its data.
+   *
+   * Google Play requires in-app deletion for any app that creates accounts,
+   * and Phase 1B creates one for every install — so this is not optional.
+   * The client cannot delete an `auth.users` row, so an edge function does it
+   * with elevated rights after verifying the caller's own JWT.
+   */
+  async deleteAccount(): Promise<{ ok: boolean; error: string | null }> {
+    try {
+      const { error } = await insforge.functions.invoke('delete-account', { body: {} });
+      await Session.clearAll();
+      return { ok: !error, error: error ? error.message : null };
+    } catch (err: any) {
+      return { ok: false, error: err?.message || 'Could not delete account.' };
     }
   },
 

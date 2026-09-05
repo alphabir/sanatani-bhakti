@@ -50,7 +50,9 @@
           "savePhotosPermission": "Allow Sanatani Bhakti to save deity wallpapers to your device.",
           "photosPermission": "Allow Sanatani Bhakti to access your gallery to save wallpapers.",
           "isAccessMediaLocationEnabled": false,
-          "granularPermissions": ["photo"]
+          "granularPermissions": [
+            "photo"
+          ]
         }
       ],
       [
@@ -71,7 +73,8 @@
         }
       ],
       "expo-iap",
-      "expo-asset"
+      "expo-asset",
+      "expo-secure-store"
     ]
   }
 }

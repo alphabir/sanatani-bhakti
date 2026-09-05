@@ -1,9 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import type { LanguageCode } from '../i18n/languages';
 import { DEFAULT_LANGUAGE } from '../i18n/languages';
 import type { NavigationState, ScreenName, TabId } from '../types';
 import { Storage, STORAGE_KEYS } from '../services/storage';
 import { InsForgeService } from '../services/insforge';
+import { Session } from '../services/session';
 
 const TAB_SCREENS: TabId[] = ['home', 'explore', 'jaap', 'mandir', 'profile'];
 
@@ -49,8 +51,17 @@ interface AppContextValue {
   cloudSyncStatus: 'idle' | 'syncing' | 'synced' | 'error';
   syncToCloud: () => Promise<boolean>;
   user: import('../services/insforge').AuthUser | null;
+  /**
+   * True once this device has ANY server identity — including the silent guest
+   * account. Almost every UI decision wants `isGuest` instead: after Phase 1B
+   * this is true for everyone, so gating a "Sign in" button on it would hide
+   * the button forever.
+   */
   isAuthenticated: boolean;
+  /** True while the identity is the device's auto-created guest account. */
+  isGuest: boolean;
   authLoading: boolean;
+  deleteAccount: () => Promise<{ ok: boolean; error: string | null }>;
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   register: (email: string, password: string, name?: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => Promise<void>;
@@ -88,6 +99,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
   const [user, setUser] = useState<import('../services/insforge').AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [isGuest, setIsGuest] = useState(true);
+  // Set when identity bootstrap failed (first launch with no network, which is
+  // common in India). Drives a retry when the app next comes to the foreground.
+  const identityPending = useRef(false);
 
   const nav = navStack[navStack.length - 1]!;
 
@@ -124,25 +139,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (v[STORAGE_KEYS.LANGUAGE]) setLanguageState(v[STORAGE_KEYS.LANGUAGE] as LanguageCode);
       if (v[STORAGE_KEYS.ONBOARDING_DONE] === 'true') setOnboardingDone(true);
 
-      let initialUser: import('../services/insforge').AuthUser | null = null;
+      // Show the cached user immediately so Profile is not blank for a frame.
+      // This is a cache, not proof of a session — bootstrapIdentity() below
+      // establishes the real one.
       if (v[STORAGE_KEYS.AUTH_USER]) {
         try {
-          initialUser = JSON.parse(v[STORAGE_KEYS.AUTH_USER]!);
-          setUser(initialUser);
-          if (initialUser?.name) setUserNameState(initialUser.name);
+          const cached = JSON.parse(v[STORAGE_KEYS.AUTH_USER]!);
+          setUser(cached);
+          if (cached?.name) setUserNameState(cached.name);
         } catch {
-          initialUser = null;
+          // ignore a corrupt cache
         }
       }
-
-      // Check live InsForge session
-      InsForgeService.getCurrentUser().then((remoteUser) => {
-        if (remoteUser) {
-          setUser(remoteUser);
-          if (remoteUser.name) setUserNameState(remoteUser.name);
-          void Storage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(remoteUser));
-        }
-      }).catch(() => {});
 
       const updated = nextStreak(v[STORAGE_KEYS.LAST_ACTIVE], storedStreak);
       if (updated === null) {
@@ -153,23 +161,89 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await Storage.setItem(STORAGE_KEYS.LAST_ACTIVE, new Date().toDateString());
       }
 
+      // First paint happens here and is never gated on the network. Everything
+      // above this line is local storage only; identity comes after.
       setIsReady(true);
 
-      // Background sync to InsForge cloud with unique user ID if available
-      void InsForgeService.syncUserData({
-        userName: v[STORAGE_KEYS.USER_NAME] || initialUser?.name || 'Bhakt',
-        punyaPoints: parseInt(v[STORAGE_KEYS.PUNYA_POINTS] || '0', 10),
-        streak: updated ?? storedStreak,
-        jaapTotal: parseInt(v[STORAGE_KEYS.JAAP_TOTAL] || '0', 10),
-        favorites: v[STORAGE_KEYS.FAVORITES] ? JSON.parse(v[STORAGE_KEYS.FAVORITES]!) : [],
-        language: (v[STORAGE_KEYS.LANGUAGE] as LanguageCode) || DEFAULT_LANGUAGE,
-        adsRemoved: v[STORAGE_KEYS.ADS_REMOVED] === 'true',
-        userId: initialUser?.id,
-      }).then((res) => {
-        if (res.ok) setCloudSyncStatus('synced');
-      });
+      void bootstrapIdentity();
     })();
   }, []);
+
+  /**
+   * Establishes this device's server identity, then reconciles with the cloud.
+   *
+   * Deliberately runs after `setIsReady(true)`: the README's rule is that the
+   * app opens straight into worship, and a signUp round-trip in front of first
+   * paint would put a spinner between the user and the app on every cold start
+   * — and a 30s hang on a bad connection.
+   */
+  const bootstrapIdentity = useCallback(async () => {
+    let account = await InsForgeService.restoreSession();
+    if (!account) account = await InsForgeService.createGuest();
+
+    if (!account) {
+      // Offline first launch. Not an error the user should see — devotional
+      // content is all local. Retry when the app next comes to the foreground.
+      identityPending.current = true;
+      return;
+    }
+    identityPending.current = false;
+
+    setUser(account);
+    if (account.name) setUserNameState(account.name);
+    void Storage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(account));
+
+    const row = await InsForgeService.ensureStatsRow();
+    if (row) setIsGuest(row.isGuest);
+
+    // Pull before push. Sync has always been push-only, so a second device
+    // would have flattened whatever the first one earned.
+    const remote = await InsForgeService.pullUserData();
+    let mergedPunya = punyaPoints;
+    let mergedJaap = jaapTotal;
+    let mergedFavorites = favorites;
+    if (remote) {
+      mergedPunya = Math.max(punyaPoints, remote.punyaPoints ?? 0);
+      mergedJaap = Math.max(jaapTotal, remote.jaapTotal ?? 0);
+      mergedFavorites = Array.from(new Set([...favorites, ...(remote.favorites ?? [])]));
+      if (typeof remote.streak === 'number') setStreak((s) => Math.max(s, remote.streak!));
+      if (mergedPunya !== punyaPoints) {
+        setPunyaPoints(mergedPunya);
+        void Storage.setItem(STORAGE_KEYS.PUNYA_POINTS, String(mergedPunya));
+      }
+      if (mergedJaap !== jaapTotal) {
+        setJaapTotal(mergedJaap);
+        void Storage.setItem(STORAGE_KEYS.JAAP_TOTAL, String(mergedJaap));
+      }
+      if (mergedFavorites.length !== favorites.length) {
+        setFavorites(mergedFavorites);
+        void Storage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(mergedFavorites));
+      }
+    }
+
+    const res = await InsForgeService.syncUserData({
+      userName: userName || account.name || 'Bhakt',
+      punyaPoints: mergedPunya,
+      streak,
+      jaapTotal: mergedJaap,
+      favorites: mergedFavorites,
+      language,
+      adsRemoved,
+      userId: account.id,
+    });
+    if (res.ok) setCloudSyncStatus('synced');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Retry identity when the app returns to the foreground, so a user who opened
+  // the app offline gets an account as soon as they have signal — without which
+  // chanting and the astrologer would stay locked out for the whole session.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && identityPending.current) void bootstrapIdentity();
+    });
+    return () => sub.remove();
+  }, [bootstrapIdentity]);
 
   const navigate = useCallback((screen: ScreenName, params?: Record<string, string>) => {
     if (TAB_SCREENS.includes(screen as TabId)) {
@@ -249,6 +323,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return res.ok;
   }, [userName, punyaPoints, streak, jaapTotal, favorites, language, adsRemoved, user?.id]);
 
+  /**
+   * Guest -> real account.
+   *
+   * The guest's progress needs no server-side merge: it already lives in local
+   * state on this device, so pushing local values onto the new account's row
+   * carries punya, jaap and favourites across. `pullUserData` first, so an
+   * account that already has progress on another device is merged rather than
+   * flattened.
+   *
+   * The guest credential is dropped so the next cold boot restores the real
+   * account instead of signing back in as the guest. The guest row itself stays
+   * on the server marked `is_guest`, for a later cleanup job to reap.
+   */
+  const completeUpgrade = useCallback(
+    async (userId: string, name?: string) => {
+      await Session.clearGuestCredential();
+      setIsGuest(false);
+
+      const remote = await InsForgeService.pullUserData();
+      const mergedPunya = Math.max(punyaPoints, remote?.punyaPoints ?? 0);
+      const mergedJaap = Math.max(jaapTotal, remote?.jaapTotal ?? 0);
+      const mergedFavorites = Array.from(new Set([...favorites, ...(remote?.favorites ?? [])]));
+
+      if (mergedPunya !== punyaPoints) {
+        setPunyaPoints(mergedPunya);
+        void Storage.setItem(STORAGE_KEYS.PUNYA_POINTS, String(mergedPunya));
+      }
+      if (mergedJaap !== jaapTotal) {
+        setJaapTotal(mergedJaap);
+        void Storage.setItem(STORAGE_KEYS.JAAP_TOTAL, String(mergedJaap));
+      }
+      if (mergedFavorites.length !== favorites.length) {
+        setFavorites(mergedFavorites);
+        void Storage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(mergedFavorites));
+      }
+
+      await InsForgeService.ensureStatsRow();
+      const res = await InsForgeService.syncUserData({
+        userName: name || userName,
+        punyaPoints: mergedPunya,
+        streak,
+        jaapTotal: mergedJaap,
+        favorites: mergedFavorites,
+        language,
+        adsRemoved,
+        userId,
+      });
+      setCloudSyncStatus(res.ok ? 'synced' : 'error');
+    },
+    [userName, punyaPoints, streak, jaapTotal, favorites, language, adsRemoved],
+  );
+
   const login = useCallback(async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     setAuthLoading(true);
     try {
@@ -262,20 +388,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         void Storage.setItem(STORAGE_KEYS.USER_NAME, res.user.name);
       }
       await Storage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(res.user));
-      if (res.accessToken) {
-        await Storage.setItem(STORAGE_KEYS.AUTH_TOKEN, res.accessToken);
-      }
-      // Sync user data to link unique user ID
-      void InsForgeService.syncUserData({
-        userName: res.user.name || userName,
-        punyaPoints,
-        streak,
-        jaapTotal,
-        favorites,
-        language,
-        adsRemoved,
-        userId: res.user.id,
-      });
+      await completeUpgrade(res.user.id, res.user.name);
       return { ok: true };
     } finally {
       setAuthLoading(false);
@@ -295,32 +408,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         void Storage.setItem(STORAGE_KEYS.USER_NAME, name);
       }
       await Storage.setItem(STORAGE_KEYS.AUTH_USER, JSON.stringify(res.user));
-      if (res.accessToken) {
-        await Storage.setItem(STORAGE_KEYS.AUTH_TOKEN, res.accessToken);
-      }
-      void InsForgeService.syncUserData({
-        userName: name || userName,
-        punyaPoints,
-        streak,
-        jaapTotal,
-        favorites,
-        language,
-        adsRemoved,
-        userId: res.user.id,
-      });
+      await completeUpgrade(res.user.id, name || res.user.name);
       return { ok: true };
     } finally {
       setAuthLoading(false);
     }
   }, [userName, punyaPoints, streak, jaapTotal, favorites, language, adsRemoved]);
 
+  /**
+   * Signing out drops the real account and returns the device to a fresh guest,
+   * rather than leaving it with no identity at all — otherwise chanting and the
+   * astrologer would 401 until the next cold start.
+   */
   const logout = useCallback(async () => {
     setAuthLoading(true);
     try {
       await InsForgeService.signOut();
       setUser(null);
+      setIsGuest(true);
       await Storage.removeItem(STORAGE_KEYS.AUTH_USER);
       await Storage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+      await bootstrapIdentity();
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [bootstrapIdentity]);
+
+  const deleteAccount = useCallback(async (): Promise<{ ok: boolean; error: string | null }> => {
+    setAuthLoading(true);
+    try {
+      const res = await InsForgeService.deleteAccount();
+      if (res.ok) {
+        setUser(null);
+        setIsGuest(true);
+        await Storage.removeItem(STORAGE_KEYS.AUTH_USER);
+        await Storage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+      }
+      return res;
     } finally {
       setAuthLoading(false);
     }
@@ -411,10 +535,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       syncToCloud,
       user,
       isAuthenticated: Boolean(user),
+      isGuest,
       authLoading,
       login,
       register,
       logout,
+      deleteAccount,
     }),
     [
       nav, navStack.length, navigate, goBack, punyaPoints, addPunya, streak,
@@ -423,7 +549,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleFavorite, selectedRashi, setSelectedRashi, jaapTotal, addJaap,
       userName, setUserName, mandirFlowers, mandirDiyas, offerFlower, lightDiya,
       language, setLanguage, onboardingDone, completeOnboarding, isReady,
-      cloudSyncStatus, syncToCloud, user, authLoading, login, register, logout,
+      cloudSyncStatus, syncToCloud, user, isGuest, authLoading, login, register, logout,
+      deleteAccount,
     ],
   );
 
