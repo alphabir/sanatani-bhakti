@@ -9,7 +9,7 @@ import { STOTRAMS, getStotramById } from '../data/stotrams';
 import { PLAYABLE_RINGTONES, getRingtoneById } from '../data/ringtones';
 import { TEMPLES, getTempleById } from '../data/temples';
 import { getTodayMuhurats } from '../data/muhurat';
-import { getUpcomingFestivals } from '../data/daily';
+import { formatFestivalDate, getUpcomingFestivals } from '../data/festivals';
 import { openSoundSettings, saveRingtone } from '../services/media';
 import { InsForgeService, type LivePanchangResponse } from '../services/insforge';
 
@@ -274,17 +274,39 @@ export function FestivalHubScreen() {
   const { t } = useTranslation();
   const festivals = getUpcomingFestivals();
 
+  // The dated table runs out eventually. Without this the screen rendered a
+  // bare heading and nothing else — a dead feature, and the exact shape Google
+  // rejects under its Minimum Functionality policy. Mirrors the ringtone
+  // screen's convention and reuses its style keys and translation keys.
+  if (festivals.length === 0) {
+    return (
+      <View style={styles.emptyWrap}>
+        <Text style={styles.emptyEmoji}>🎉</Text>
+        <Text style={styles.emptyTitle}>{t('unavailable')}</Text>
+        <Text style={styles.emptyBody}>{t('festivalHub')}</Text>
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.pageHint}>🎉 {t('festivalHub')}</Text>
       {festivals.map((f) => {
         const deity = DEITIES.find((d) => d.id === f.deity);
         return (
-          <Card key={f.id}>
+          // Keyed by id AND date: a festival appears once per authored year, so
+          // the id alone is not unique across the list.
+          <Card key={`${f.id}-${f.date}`}>
             <Text style={styles.festivalEmoji}>{deity?.emoji}</Text>
             <Text style={styles.title}>{f.name}</Text>
-            <Text style={styles.sub}>{f.date}</Text>
+            <Text style={styles.sub}>
+              {formatFestivalDate(f.date)}
+              {f.altDate ? ` / ${formatFestivalDate(f.altDate)}` : ''}
+            </Text>
             <Text style={styles.desc}>{f.description}</Text>
+            {/* Shown only where two dates are genuinely defensible, rather than
+                silently picking one and being wrong for half the country. */}
+            {f.note ? <Text style={styles.desc}>ℹ️ {f.note}</Text> : null}
             <Pressable style={styles.pujaBtn} onPress={() => navigate('puja-list')}>
               <Text style={styles.pujaBtnText}>🙏 {t('viewPuja')}</Text>
             </Pressable>

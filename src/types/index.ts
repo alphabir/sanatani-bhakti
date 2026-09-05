@@ -91,12 +91,58 @@ export interface KnowledgeCard {
   deity?: DeityId;
 }
 
+/**
+ * How strongly a festival is observed. `not-observed` removes the row for a
+ * region entirely rather than ranking it low.
+ */
+export type Prominence = 'headline' | 'major' | 'observed' | 'not-observed';
+
+/**
+ * One year's observance.
+ *
+ * Usually a plain ISO date. The object form exists because some observances
+ * genuinely have two defensible dates in the same year — Durga Ashtami 2026
+ * falls on 18 Oct by the Bengali panjika and pandal schedule but 19 Oct under
+ * the strict sunrise-tithi rule. Showing one and hiding the other is worse
+ * than showing both, so the data can carry the alternative and a note.
+ */
+export type FestivalDate = string | { date: string; altDate?: string; note?: string };
+
 export interface Festival {
   id: string;
+  /** Pan-India English name. Always present — the universal safe fallback. */
   name: string;
-  date: string;
+  nameHindi?: string;
   description: string;
   deity: DeityId;
+  /**
+   * Gregorian start date per year: `{ 2026: '2026-11-08', 2027: '...' }`.
+   *
+   * Keyed by year rather than a single `date` deliberately: a single-year field
+   * is what let every festival in this app silently expire, leaving the
+   * Festival Hub rendering an empty screen. Author at least two years ahead and
+   * re-check before the last one runs out.
+   */
+  dates: Record<number, FestivalDate>;
+  /** Observance length in days, including the start day. Default 1. */
+  spanDays?: number;
+  prominence: Prominence;
+}
+
+/** A festival resolved to one concrete year, which is what screens render. */
+export interface ResolvedFestival {
+  id: string;
+  name: string;
+  nameHindi?: string;
+  description: string;
+  deity: DeityId;
+  /** ISO `YYYY-MM-DD`. Compared and sorted as a string, so the format matters. */
+  date: string;
+  /** Set only where a second date is equally defensible. */
+  altDate?: string;
+  note?: string;
+  spanDays?: number;
+  prominence: Prominence;
 }
 
 export type TabId = 'home' | 'explore' | 'jaap' | 'mandir' | 'profile';

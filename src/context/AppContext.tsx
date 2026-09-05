@@ -9,6 +9,17 @@ import { Session } from '../services/session';
 
 const TAB_SCREENS: TabId[] = ['home', 'explore', 'jaap', 'mandir', 'profile'];
 
+/**
+ * Punya awarded for a completed jaap of `count` repetitions.
+ *
+ * Exported so the UI can state the real number instead of a hardcoded one. The
+ * completion modal used to promise "50 Punya" for a 108 mala while this awarded
+ * 11 — a number the user could watch not appear.
+ */
+export function punyaForJaap(count: number): number {
+  return Math.floor(count / 10) + 1;
+}
+
 interface AppContextValue {
   nav: NavigationState;
   navigate: (screen: ScreenName, params?: Record<string, string>) => void;
@@ -135,6 +146,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (v[STORAGE_KEYS.SELECTED_RASHI]) setSelectedRashiState(parseInt(v[STORAGE_KEYS.SELECTED_RASHI]!, 10));
       if (v[STORAGE_KEYS.JAAP_TOTAL]) setJaapTotal(parseInt(v[STORAGE_KEYS.JAAP_TOTAL]!, 10));
+      if (v[STORAGE_KEYS.MANDIR_FLOWERS]) setMandirFlowers(parseInt(v[STORAGE_KEYS.MANDIR_FLOWERS]!, 10));
+      if (v[STORAGE_KEYS.MANDIR_DIYAS]) setMandirDiyas(parseInt(v[STORAGE_KEYS.MANDIR_DIYAS]!, 10));
       if (v[STORAGE_KEYS.USER_NAME]) setUserNameState(v[STORAGE_KEYS.USER_NAME]!);
       if (v[STORAGE_KEYS.LANGUAGE]) setLanguageState(v[STORAGE_KEYS.LANGUAGE] as LanguageCode);
       if (v[STORAGE_KEYS.ONBOARDING_DONE] === 'true') setOnboardingDone(true);
@@ -289,7 +302,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       Storage.setItem(STORAGE_KEYS.JAAP_TOTAL, String(next));
       return next;
     });
-    addPunya(Math.floor(count / 10) + 1);
+    addPunya(punyaForJaap(count));
   }, [addPunya]);
 
   const setUserName = useCallback(async (name: string) => {
@@ -450,13 +463,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Persisted, unlike before: these counters were plain state, so the flowers
+  // and diyas a user had offered reset to zero on every launch while the punya
+  // they earned persisted — the tally visibly disagreed with itself.
   const offerFlower = useCallback(() => {
-    setMandirFlowers((n) => n + 1);
+    setMandirFlowers((n) => {
+      const next = n + 1;
+      void Storage.setItem(STORAGE_KEYS.MANDIR_FLOWERS, String(next));
+      return next;
+    });
     addPunya(5);
   }, [addPunya]);
 
   const lightDiya = useCallback(() => {
-    setMandirDiyas((n) => n + 1);
+    setMandirDiyas((n) => {
+      const next = n + 1;
+      void Storage.setItem(STORAGE_KEYS.MANDIR_DIYAS, String(next));
+      return next;
+    });
     addPunya(10);
   }, [addPunya]);
 

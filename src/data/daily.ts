@@ -1,4 +1,4 @@
-import type { DailyStatus, KnowledgeCard, Festival } from '../types';
+import type { DailyStatus, KnowledgeCard } from '../types';
 
 export const DAILY_STATUSES: DailyStatus[] = [
   { id: 's1', quote: 'Where there is dharma, there is victory.', quoteHindi: 'जहाँ धर्म है, वहाँ विजय है।', author: 'Mahabharata', deity: 'krishna' },
@@ -26,29 +26,16 @@ export const KNOWLEDGE_CARDS: KnowledgeCard[] = [
   { id: 'k6', title: 'Navratri Nine Forms', content: 'During Navratri, nine forms of Durga are worshipped — Shailaputri to Siddhidatri, each representing divine qualities.', deity: 'durga' },
 ];
 
-export const FESTIVALS: Festival[] = [
-  { id: 'f1', name: 'Diwali', date: '2025-10-20', description: 'Festival of lights — Lakshmi-Ganesh puja', deity: 'lakshmi' },
-  { id: 'f2', name: 'Navratri', date: '2025-09-22', description: 'Nine nights of Durga worship', deity: 'durga' },
-  { id: 'f3', name: 'Janmashtami', date: '2025-08-16', description: 'Birth of Lord Krishna', deity: 'krishna' },
-  { id: 'f4', name: 'Ganesh Chaturthi', date: '2025-08-27', description: 'Birth of Lord Ganesh', deity: 'ganesh' },
-  { id: 'f5', name: 'Mahashivratri', date: '2026-02-15', description: 'Great night of Shiva', deity: 'shiv' },
-  { id: 'f6', name: 'Ram Navami', date: '2026-03-27', description: 'Birth of Lord Ram', deity: 'ram' },
-  { id: 'f7', name: 'Holi', date: '2026-03-04', description: 'Festival of colors — victory of good', deity: 'krishna' },
-];
-
-export function getUpcomingFestivals(): Festival[] {
-  const today = new Date().toISOString().split('T')[0]!;
-  return FESTIVALS.filter((f) => f.date >= today).sort((a, b) => a.date.localeCompare(b.date));
-}
-
-export function getTodayTithi(): { tithi: string; paksha: string; month: string } {
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const day = days[new Date().getDay()]!;
-  const tithis = ['Pratipada', 'Dwitiya', 'Tritiya', 'Chaturthi', 'Panchami', 'Shashthi', 'Saptami', 'Ashtami', 'Navami', 'Dashami', 'Ekadashi', 'Dwadashi', 'Trayodashi', 'Chaturdashi', 'Purnima'];
-  const idx = new Date().getDate() % tithis.length;
-  return {
-    tithi: tithis[idx]!,
-    paksha: new Date().getDate() <= 15 ? 'Shukla Paksha' : 'Krishna Paksha',
-    month: 'Jyeshtha',
-  };
-}
+// FESTIVALS and getUpcomingFestivals() now live in ./festivals, keyed by year.
+// The table here held seven single-date entries, all of which had expired —
+// so getUpcomingFestivals() returned nothing and the Festival Hub rendered an
+// empty screen.
+//
+// getTodayTithi() has been DELETED rather than fixed. It returned
+// `getDate() % 15` as the tithi, `date <= 15` as the paksha, and the month
+// hardcoded to 'Jyeshtha' all year — presented on Home as "Vedic Tithi &
+// Paksha". A real tithi depends on the angular distance between the sun and
+// moon and cannot be computed without an ephemeris. Showing nothing is honest;
+// showing a plausible-looking fabrication to an audience that knows panchang
+// is not. The Home card now renders only from the server's live panchang, and
+// shows a dash when that is unavailable.

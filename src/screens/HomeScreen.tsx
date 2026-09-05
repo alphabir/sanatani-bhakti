@@ -5,15 +5,17 @@ import { DeityScroller, QuickActionGrid } from '../components/QuickActions';
 import { Colors, DEITIES, FontSize, Spacing, ZODIAC_DATA } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import { useTranslation } from '../i18n';
-import { getTodayStatus, getTodayTithi, getUpcomingFestivals } from '../data/daily';
+import { getTodayStatus } from '../data/daily';
+import { formatFestivalDate, getUpcomingFestivals } from '../data/festivals';
 import { getRashifalForDay } from '../data/rashifal';
+import { DEFAULT_PLACE, getSunTimes } from '../data/muhurat';
 import { MANTRAS } from '../data/mantras';
 
 export function HomeScreen() {
   const { navigate, addPunya, selectedRashi } = useApp();
   const { t } = useTranslation();
   const status = getTodayStatus();
-  const tithi = getTodayTithi();
+  const sun = getSunTimes();
   const festivals = getUpcomingFestivals().slice(0, 2);
   const deity = DEITIES.find((d) => d.id === status.deity);
   const featuredMantra = MANTRAS[0]!;
@@ -66,7 +68,9 @@ export function HomeScreen() {
         </View>
       </Card>
 
-      {/* Panchang & Tithi Ephemeris Card */}
+      {/* Panchang. Renders only real values: a fabricated tithi used to sit
+          here, so the card now shows a dash rather than a plausible guess when
+          the live panchang is unavailable. */}
       <SectionTitle
         title={t('todayPanchang')}
         action={t('muhurat')}
@@ -78,11 +82,11 @@ export function HomeScreen() {
             <Text style={styles.tithiIcon}>🌙</Text>
           </View>
           <View style={styles.tithiInfo}>
-            <Text style={styles.tithiLabel}>Vedic Tithi & Paksha</Text>
+            <Text style={styles.tithiLabel}>Sunrise & Sunset · {DEFAULT_PLACE.name}</Text>
             <Text style={styles.tithiValue}>
-              {tithi.tithi} • {tithi.paksha}
+              {sun ? `🌅 ${sun.sunrise}  •  🌇 ${sun.sunset}` : '—'}
             </Text>
-            <Text style={styles.tithiMonth}>{tithi.month} Masa</Text>
+            <Text style={styles.tithiMonth}>Tap for today's muhurat</Text>
           </View>
           <View style={styles.panchangAction}>
             <Text style={styles.panchangActionText}>Muhurat ›</Text>
@@ -139,10 +143,10 @@ export function HomeScreen() {
             onAction={() => navigate('festival-hub')}
           />
           {festivals.map((f) => (
-            <Card key={f.id} onPress={() => navigate('festival-hub')}>
+            <Card key={`${f.id}-${f.date}`} onPress={() => navigate('festival-hub')}>
               <Text style={styles.festivalName}>🎉 {f.name}</Text>
               <Text style={styles.festivalDate}>
-                {f.date} · {f.description}
+                {formatFestivalDate(f.date)} · {f.description}
               </Text>
             </Card>
           ))}

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Modal,
   Pressable,
   ScrollView,
@@ -10,7 +11,8 @@ import {
 } from 'react-native';
 import { Card } from '../components/Card';
 import { Colors, FontSize, Spacing } from '../constants/theme';
-import { useApp } from '../context/AppContext';
+import { punyaForJaap, useApp } from '../context/AppContext';
+import { Storage, STORAGE_KEYS } from '../services/storage';
 import { useTranslation } from '../i18n';
 import { useAppInterstitial } from '../ads/useAppInterstitial';
 import { vibrate } from '../utils/vibrate';
@@ -43,6 +45,46 @@ export function JaapScreen() {
   const [completed, setCompleted] = useState(false);
   const [selectedMantra, setSelectedMantra] = useState(ASTRO_MANTRAS[0]);
   const [showDakshinaModal, setShowDakshinaModal] = useState(false);
+
+  // An unfinished mala used to be lost the moment the app was backgrounded —
+  // up to 1007 taps. Restore it on mount, and save whenever the app leaves the
+  // foreground rather than on every tap, so a 1008 jaap does not mean 1008
+  // writes to disk.
+  useEffect(() => {
+    let active = true;
+    void Storage.getItem(STORAGE_KEYS.JAAP_PROGRESS).then((raw) => {
+      if (!active || !raw) return;
+      try {
+        const saved = JSON.parse(raw) as { count?: number; target?: number };
+        if (typeof saved.target === 'number') setTarget(saved.target);
+        if (typeof saved.count === 'number' && saved.count > 0) setCount(saved.count);
+      } catch {
+        // Corrupt value — start fresh rather than crash mid-prayer.
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const progressRef = useRef({ count: 0, target: 108, completed: false });
+  progressRef.current = { count, target, completed };
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') return;
+      const p = progressRef.current;
+      if (p.completed || p.count <= 0) {
+        void Storage.removeItem(STORAGE_KEYS.JAAP_PROGRESS);
+      } else {
+        void Storage.setItem(
+          STORAGE_KEYS.JAAP_PROGRESS,
+          JSON.stringify({ count: p.count, target: p.target }),
+        );
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const increment = () => {
     if (completed) return;
@@ -170,7 +212,7 @@ export function JaapScreen() {
             <Text style={styles.purnahutiEmoji}>🪷</Text>
             <Text style={styles.purnahutiTitle}>108 Mala Purnahuti Complete!</Text>
             <Text style={styles.purnahutiSub}>
-              Sacred recitation of {selectedMantra.name} finished. 50 Punya points added to your spiritual aura.
+              Sacred recitation of {selectedMantra.name} finished. {punyaForJaap(target)} Punya points added to your spiritual aura.
             </Text>
 
             <Card style={styles.dakshinaCard}>

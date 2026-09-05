@@ -57,4 +57,8 @@ export const STORAGE_KEYS = {
   ASTRO_CREDITS: '@sanatani/astroCredits',
   IS_VIP: '@sanatani/isVip',
   TOTAL_DAKSHINA: '@sanatani/totalDakshina',
+  MANDIR_FLOWERS: '@sanatani/mandirFlowers',
+  MANDIR_DIYAS: '@sanatani/mandirDiyas',
+  /** In-progress jaap: `{ count, target }`, so a mala is not lost on backgrounding. */
+  JAAP_PROGRESS: '@sanatani/jaapProgress',
 } as const;
